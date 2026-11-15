@@ -20,12 +20,12 @@
  */
 
 const { getConfig } = require('../src/config');
-const { JsonFileSeenStore } = require('../src/seen-store');
+const { createSeenStore } = require('../src/seen-store');
 const { Prover } = require('../src/prover');
 const { createHandler } = require('../src/handler');
 
 const config = getConfig();
-const store = new JsonFileSeenStore(config.seenStorePath);
+const store = createSeenStore({ filePath: config.seenStorePath });
 store.load();
 const prover = new Prover({ circuitsDir: config.circuitsDir, taskIdMode: config.taskIdMode });
 const handle = createHandler({ config, store, prover });

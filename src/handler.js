@@ -121,11 +121,11 @@ function createHandler({ config, store, prover }) {
   }
 
   /** Record a task's proof_tx as seen (best effort, never throws). */
-  function recordProofTx(envelope) {
+  async function recordProofTx(envelope) {
     try {
       const proofTx = envelope && envelope.input && envelope.input.proof_tx;
       if (typeof proofTx === 'string' && proofTx.trim() !== '') {
-        store.addProofTx(canonicalProofTx(proofTx));
+        await store.addProofTx(canonicalProofTx(proofTx));
       }
     } catch (err) {
       console.error(`[gatekeeper] recordProofTx failed: ${err.message}`);
@@ -133,9 +133,11 @@ function createHandler({ config, store, prover }) {
   }
 
   /** Finish a task: cache the response under task_id and return it signed. */
-  function finish(taskId, responseObj) {
+  async function finish(taskId, responseObj) {
     const res = signed(200, responseObj);
-    if (taskId) store.setResponse(taskId, { status: res.status, body: res.body });
+    if (taskId) {
+      await store.setResponse(taskId, { status: res.status, body: res.body });
+    }
     return res;
   }
 
@@ -149,11 +151,15 @@ function createHandler({ config, store, prover }) {
     // caching, no proof_tx recording — just INVALID_TASK.
     if (!taskId) {
       console.log('[gatekeeper] missing task_id -> INVALID_TASK');
-      return finish(null, invalidTaskResponse(envelope));
+      return await finish(null, invalidTaskResponse(envelope));
     }
 
+    // Wait for the store's initial load (a cold start fetching the seen-set
+    // from KV) before any read: hasProofTx is sync against memory.
+    await store.ready();
+
     // 1. Idempotent redelivery: same task_id -> same response, no re-eval.
-    const cached = store.getResponse(taskId);
+    const cached = await store.getResponse(taskId);
     if (cached) {
       console.log(`[gatekeeper] ${taskId} redelivered -> cached response`);
       // Byte-identical body (HMAC is deterministic, so the signature
@@ -167,8 +173,8 @@ function createHandler({ config, store, prover }) {
       if (deadlineMs !== null && Date.now() > deadlineMs + DEADLINE_GRACE_MS) {
         console.log(`[gatekeeper] ${taskId || '?'} deadline passed -> INVALID_TASK`);
         // The fields were readable, so the proof was genuinely seen.
-        recordProofTx(envelope);
-        return finish(taskId, invalidTaskResponse(envelope));
+        await recordProofTx(envelope);
+        return await finish(taskId, invalidTaskResponse(envelope));
       }
       if (deadlineMs === null) {
         console.log(`[gatekeeper] ${taskId || '?'} unparseable deadline_at, ignoring`);
@@ -188,18 +194,18 @@ function createHandler({ config, store, prover }) {
       });
     } catch (err) {
       console.log(`[gatekeeper] ${taskId || '?'} malformed: ${err.message} -> INVALID_TASK`);
-      return finish(taskId, invalidTaskResponse(envelope));
+      return await finish(taskId, invalidTaskResponse(envelope));
     }
 
     // 4. Record proof_tx only AFTER a successful evaluation.
-    recordProofTx(envelope);
+    await recordProofTx(envelope);
 
     const proofTx = envelope.input.proof_tx;
 
     // 5a. PROOF_REUSED carries no proof.
     if (!outcome.provable) {
       console.log(`[gatekeeper] ${taskId} -> REJECT PROOF_REUSED (no proof)`);
-      return finish(taskId, {
+      return await finish(taskId, {
         decision: 'REJECT',
         reason_code: 'PROOF_REUSED',
         proof_tx: proofTx,
@@ -215,7 +221,7 @@ function createHandler({ config, store, prover }) {
         `[gatekeeper] ${taskId} -> ${outcome.decision} ${outcome.reasonCode} ` +
           `(proved in ${Date.now() - started}ms)`,
       );
-      return finish(taskId, {
+      return await finish(taskId, {
         decision: outcome.decision,
         reason_code: outcome.reasonCode,
         proof,
@@ -228,13 +234,13 @@ function createHandler({ config, store, prover }) {
       );
       if (outcome.decision === 'APPROVE') {
         // Never return an unproven APPROVE.
-        return finish(taskId, {
+        return await finish(taskId, {
           decision: 'REJECT',
           reason_code: 'INVALID_TASK',
           proof_tx: proofTx,
         });
       }
-      return finish(taskId, {
+      return await finish(taskId, {
         decision: 'REJECT',
         reason_code: outcome.reasonCode,
         proof_tx: proofTx,
@@ -283,7 +289,7 @@ function createHandler({ config, store, prover }) {
       } catch (err) {
         // Last-resort fail closed: never leave a task unanswered.
         console.error(`[gatekeeper] unexpected task error: ${err.stack || err.message}`);
-        return finish(
+        return await finish(
           typeof envelope.task_id === 'string' ? envelope.task_id : null,
           invalidTaskResponse(envelope),
         );
