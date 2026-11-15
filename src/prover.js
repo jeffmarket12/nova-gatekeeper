@@ -19,8 +19,18 @@
  */
 
 const path = require('path');
-const snarkjs = require('snarkjs');
 const { toFieldString, taskIdToField, saltForTask } = require('./field');
+
+// snarkjs is a large module: requiring it at startup adds seconds to a
+// serverless cold start, which risks the platform's 10s preflight window
+// (a cold preflight took 9.8s before this change). Load it lazily on the
+// first prove/verify instead — preflights never need it, and the 60s task
+// window has ample room for the one-off load.
+let _snarkjs = null;
+function loadSnarkjs() {
+  if (!_snarkjs) _snarkjs = require('snarkjs');
+  return _snarkjs;
+}
 
 class Prover {
   constructor({ circuitsDir, taskIdMode }) {
@@ -55,7 +65,7 @@ class Prover {
 
   /** Generate {proof, publicSignals}. Throws when the circuit asserts fail. */
   async prove(circuitInput) {
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    const { proof, publicSignals } = await loadSnarkjs().groth16.fullProve(
       circuitInput,
       this.wasmPath,
       this.zkeyPath,
@@ -66,7 +76,7 @@ class Prover {
   /** Lazily export (and cache) the verification key from the .zkey. */
   async getVerificationKey() {
     if (!this._verificationKey) {
-      this._verificationKey = await snarkjs.zKey.exportVerificationKey(this.zkeyPath);
+      this._verificationKey = await loadSnarkjs().zKey.exportVerificationKey(this.zkeyPath);
     }
     return this._verificationKey;
   }
@@ -74,7 +84,7 @@ class Prover {
   /** Local verification (used by the tests; the platform verifies itself). */
   async verify(proof, publicSignals) {
     const vk = await this.getVerificationKey();
-    return snarkjs.groth16.verify(vk, publicSignals, proof);
+    return loadSnarkjs().groth16.verify(vk, publicSignals, proof);
   }
 }
 
