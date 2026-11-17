@@ -82,6 +82,21 @@ function taskIdToField(taskId, mode) {
       if (hex === '') throw new Error('task_id: no hex chars for hex TASK_ID_MODE');
       return toFieldString(BigInt(`0x${hex}`));
     }
+    case 'uuid': {
+      // The UUID part of the task_id ("task_R05_<uuid>" / "practice_<uuid>")
+      // as a 128-bit number. The platform's task ids are prefix + UUID; the
+      // UUID is the unique part, so a dev may map it directly.
+      const m = taskId.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+      if (!m) throw new Error('task_id: no UUID for uuid TASK_ID_MODE');
+      return toFieldString(BigInt(`0x${m[0].replace(/-/g, '')}`));
+    }
+    case 'sha256uuid': {
+      // SHA-256 of the UUID part only (prefix stripped).
+      const m = taskId.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+      if (!m) throw new Error('task_id: no UUID for sha256uuid TASK_ID_MODE');
+      const digest = crypto.createHash('sha256').update(m[0], 'utf8').digest();
+      return toFieldString(BigInt(`0x${digest.toString('hex')}`));
+    }
     default:
       throw new Error(`unknown TASK_ID_MODE: ${mode}`);
   }

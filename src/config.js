@@ -20,7 +20,7 @@
 
 const path = require('path');
 
-const TASK_ID_MODES = ['sha256', 'keccak256', 'numeric', 'hex'];
+const TASK_ID_MODES = ['sha256', 'keccak256', 'numeric', 'hex', 'uuid', 'sha256uuid'];
 
 function defaultSeenStorePath() {
   // Vercel sets VERCEL=1; its filesystem is read-only except /tmp.
